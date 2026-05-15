@@ -1,4 +1,5 @@
 export const FIVE_YEARS_DAYS = 365 * 5;
+export const THREE_YEARS_DAYS = 365 * 3;
 
 export type StaticTopic = {
   id: string;
@@ -69,7 +70,7 @@ export type StaticPaperData = {
 
 export const emptyStaticPaperData: StaticPaperData = {
   generatedAt: new Date(0).toISOString(),
-  daysBack: FIVE_YEARS_DAYS,
+  daysBack: THREE_YEARS_DAYS,
   topics: [],
   qualityVenues: [],
   papers: [],

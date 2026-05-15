@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   emptyStaticPaperData,
   FIVE_YEARS_DAYS,
+  THREE_YEARS_DAYS,
   type StaticPaper,
   type StaticPaperData,
 } from "@/lib/static-data";
@@ -28,6 +29,7 @@ const statusLabels: Record<string, string> = {
 };
 
 const fiveYears = String(FIVE_YEARS_DAYS);
+const threeYears = String(THREE_YEARS_DAYS);
 
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
@@ -42,7 +44,7 @@ export function PaperDashboard() {
   const [source, setSource] = useState("all");
   const [venue, setVenue] = useState("all");
   const [topicId, setTopicId] = useState("all");
-  const [days, setDays] = useState(fiveYears);
+  const [days, setDays] = useState(threeYears);
   const [sort, setSort] = useState<"desc" | "asc">("desc");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -134,9 +136,9 @@ export function PaperDashboard() {
         }
 
         if (cutoff !== undefined) {
-          // 没有日期的论文不能确定时间窗，明确排除；选"最近 5 年"以上时再保留。
+          // 没有日期的论文不能确定时间窗，短窗口下排除；选"最近 3 年"以上时再保留。
           if (!paper.publishedAt) {
-            return days_ >= FIVE_YEARS_DAYS;
+            return days_ >= THREE_YEARS_DAYS;
           }
           return new Date(paper.publishedAt).getTime() >= cutoff;
         }
@@ -272,6 +274,7 @@ export function PaperDashboard() {
             <option value="30">最近 30 天</option>
             <option value="90">最近 90 天</option>
             <option value="365">最近 1 年</option>
+            <option value={threeYears}>最近 3 年</option>
             <option value={fiveYears}>最近 5 年</option>
           </select>
           <select

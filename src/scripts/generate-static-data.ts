@@ -11,6 +11,8 @@ import {
   type StaticTopic,
 } from "../lib/static-data";
 
+type SyncMode = "full" | "incremental";
+
 type TopicConfig = {
   topics?: Array<{
     name: string;
@@ -53,11 +55,18 @@ const rootDir = process.cwd();
 const configPath = path.join(rootDir, "config", "keywords.json");
 const venuesPath = path.join(rootDir, "config", "venues.json");
 const outputPath = path.join(rootDir, "public", "data", "papers.json");
-const daysBack = Number(process.env.SYNC_DAYS_BACK ?? FIVE_YEARS_DAYS);
+// retentionDaysBack：保留窗口（默认 3 年），超过窗口的旧论文会从输出里淘汰。
+const retentionDaysBack = Number(process.env.SYNC_DAYS_BACK ?? FIVE_YEARS_DAYS);
+// 增量模式下每次实际向各源请求的时间窗口，默认 7 天。
+const incrementalDaysBack = Number(process.env.SYNC_INCREMENTAL_DAYS_BACK ?? 7);
+const requestedMode: SyncMode = process.env.SYNC_MODE === "incremental" ? "incremental" : "full";
 const limitPerSource = Number(process.env.SYNC_LIMIT_PER_SOURCE ?? 50);
 const repositoryCheckLimit = Number(process.env.REPOSITORY_CHECK_LIMIT ?? 80);
 const repositoryConcurrency = Number(process.env.REPOSITORY_CHECK_CONCURRENCY ?? 4);
 const termLimit = Number(process.env.SYNC_TERM_LIMIT ?? 0); // 0 表示不限
+// 每个 topic 最多保留多少篇论文。429 个 term 合起来可能产出几万篇，
+// 一次性塞进浏览器加载的 JSON 既慢又卡，先裁剪到一个合理量级。
+const maxPapersPerTopic = Number(process.env.MAX_PAPERS_PER_TOPIC ?? 400);
 
 async function main() {
   const topics = await loadTopics();
@@ -69,6 +78,26 @@ async function main() {
   const repositoryQueue: Array<{ key: string; paper: SourcePaper }> = [];
   const repoSeen = new Set<string>();
   const warnings: StaticPaperData["warnings"] = [];
+
+  // 决定本次跑 full 还是 incremental。incremental 模式下要求能读到上次的输出，
+  // 否则自动回退到 full（避免第一次部署就只抓最近 7 天）。
+  let mode: SyncMode = requestedMode;
+  let seeded = 0;
+  if (mode === "incremental") {
+    const existing = await loadExistingData();
+    if (existing) {
+      seeded = seedExistingPapers(existing, paperMap, keyIndex, topics, qualityVenues);
+      console.log(
+        `[paper-tracker] mode=incremental, seeded ${seeded} papers from previous run ` +
+          `(generatedAt=${existing.generatedAt})`,
+      );
+    } else {
+      console.log("[paper-tracker] mode=incremental requested but no previous papers.json found; running full fetch");
+      mode = "full";
+    }
+  }
+
+  const fetchDaysBack = mode === "incremental" ? incrementalDaysBack : retentionDaysBack;
 
   // 合并所有 topic 的 term，跨 topic 共用一次抓取（cache 在 sources/index.ts 里）。
   const termToTopics = new Map<string, RuntimeTopic[]>();
@@ -86,14 +115,15 @@ async function main() {
     `[paper-tracker] fetching ${plannedTerms.length}` +
       (termLimit > 0 && termLimit < allTerms.length ? `/${allTerms.length}` : "") +
       ` unique terms across ${topics.length} topics ` +
-      `(daysBack=${daysBack}, limitPerSource=${limitPerSource})`,
+      `(mode=${mode}, fetchDaysBack=${fetchDaysBack}, retentionDaysBack=${retentionDaysBack}, ` +
+      `limitPerSource=${limitPerSource})`,
   );
 
   let termIndex = 0;
   for (const [term, topicsForTerm] of plannedTerms) {
     termIndex += 1;
     const startedAt = Date.now();
-    const sourceResults = await searchAllSources(term, { daysBack, limit: limitPerSource });
+    const sourceResults = await searchAllSources(term, { daysBack: fetchDaysBack, limit: limitPerSource });
     collectWarnings(sourceResults, warnings, term);
 
     const perSourceCounts: number[] = [];
@@ -141,14 +171,36 @@ async function main() {
     );
   }
 
-  await applyRepositoryDetections(paperMap, repositoryQueue.slice(0, repositoryCheckLimit), warnings);
+  let allPapers = Array.from(paperMap.values()).sort(sortNewestFirst);
+  const beforeRetention = allPapers.length;
+  allPapers = pruneByRetention(allPapers, retentionDaysBack);
+  if (allPapers.length < beforeRetention) {
+    console.log(
+      `[paper-tracker] pruned ${beforeRetention - allPapers.length} papers older than ` +
+        `${retentionDaysBack} days (kept ${allPapers.length})`,
+    );
+  }
+  const papers = capPapersPerTopic(allPapers, topics, maxPapersPerTopic);
 
-  const papers = Array.from(paperMap.values()).sort(sortNewestFirst);
+  if (papers.length < allPapers.length) {
+    console.log(
+      `[paper-tracker] capped ${allPapers.length} → ${papers.length} papers ` +
+        `(MAX_PAPERS_PER_TOPIC=${maxPapersPerTopic})`,
+    );
+  }
+
+  // 仓库检测放在裁剪之后：被裁掉的论文不值得占 GitHub API 配额。
+  const keptKeys = new Set(papers.map((paper) => paper.id));
+  const repositoryTargets = repositoryQueue
+    .filter((entry) => keptKeys.has(entry.key))
+    .slice(0, repositoryCheckLimit);
+  await applyRepositoryDetections(paperMap, repositoryTargets, warnings);
+
   recomputeTopicCounts(topics, papers);
 
   const data: StaticPaperData = {
     generatedAt: new Date().toISOString(),
-    daysBack,
+    daysBack: retentionDaysBack,
     topics: topics.map(toPublicTopic),
     qualityVenues: qualityVenues.map(toPublicQualityVenue),
     papers,
@@ -264,15 +316,23 @@ function makeTermMatcher(term: string): (text: string) => boolean {
 }
 
 function matchesTopic(paper: SourcePaper, topic: RuntimeTopic): boolean {
-  const text = [paper.title, paper.abstract, paper.authors?.join(" "), paper.venue]
+  return matchesTopicByText(buildSearchText(paper), topic);
+}
+
+function buildSearchText(
+  paper: { title?: string; abstract?: string; authors?: string[] | string; venue?: string },
+): string {
+  const authors = Array.isArray(paper.authors) ? paper.authors.join(" ") : paper.authors;
+  return [paper.title, paper.abstract, authors, paper.venue]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
 
+function matchesTopicByText(text: string, topic: RuntimeTopic): boolean {
   if (!topic.includeMatchers.some((matcher) => matcher.test(text))) {
     return false;
   }
-
   return !topic.excludeMatchers.some((matcher) => matcher.test(text));
 }
 
@@ -280,14 +340,15 @@ function matchQualityVenue(
   paper: SourcePaper,
   qualityVenues: RuntimeQualityVenue[],
 ): QualityVenue | undefined {
-  const venue = paper.venue;
-  if (!venue) {
-    return undefined;
-  }
+  return paper.venue ? matchQualityVenueByString(paper.venue, qualityVenues) : undefined;
+}
 
+function matchQualityVenueByString(
+  venue: string,
+  qualityVenues: RuntimeQualityVenue[],
+): QualityVenue | undefined {
   for (const qualityVenue of qualityVenues) {
     const matched = qualityVenue.aliasMatchers.find((entry) => entry.test(venue));
-
     if (matched) {
       return {
         name: qualityVenue.name,
@@ -297,7 +358,6 @@ function matchQualityVenue(
       };
     }
   }
-
   return undefined;
 }
 
@@ -442,6 +502,41 @@ function applyRepository(paper: StaticPaper, repository: RepositoryDetection) {
     : [];
 }
 
+/**
+ * 给每个 topic 限定最多保留多少篇论文，按发布时间倒序优先保留最新的。
+ * 没有日期的论文排最后。一篇论文同时属于多个 topic，只要被任一 topic 选中就保留。
+ */
+function capPapersPerTopic(
+  papers: StaticPaper[],
+  topics: RuntimeTopic[],
+  perTopicLimit: number,
+): StaticPaper[] {
+  if (!Number.isFinite(perTopicLimit) || perTopicLimit <= 0) {
+    return papers;
+  }
+
+  const score = (paper: StaticPaper): number => {
+    return paper.publishedAt ? new Date(paper.publishedAt).getTime() : 0;
+  };
+
+  const keep = new Set<string>();
+  const sorted = [...papers].sort((a, b) => score(b) - score(a));
+
+  for (const topic of topics) {
+    let kept = 0;
+    for (const paper of sorted) {
+      if (kept >= perTopicLimit) break;
+      if (paper.topics.some((item) => item.id === topic.id)) {
+        keep.add(paper.id);
+        kept += 1;
+      }
+    }
+  }
+
+  // 不属于任何 runtime topic 的孤儿（理论上不会出现）也保留。
+  return papers.filter((paper) => keep.has(paper.id) || paper.topics.length === 0);
+}
+
 function recomputeTopicCounts(topics: RuntimeTopic[], papers: StaticPaper[]) {
   const counts = new Map<string, number>();
   for (const paper of papers) {
@@ -478,6 +573,99 @@ function sortNewestFirst(left: StaticPaper, right: StaticPaper) {
   const rightTime = right.publishedAt ? new Date(right.publishedAt).getTime() : 0;
 
   return rightTime - leftTime;
+}
+
+async function loadExistingData(): Promise<StaticPaperData | undefined> {
+  try {
+    const raw = await readFile(outputPath, "utf8");
+    const parsed = JSON.parse(raw) as StaticPaperData;
+    if (!Array.isArray(parsed?.papers)) {
+      return undefined;
+    }
+    return parsed;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    console.warn(`[paper-tracker] failed to read previous papers.json: ${(error as Error).message}`);
+    return undefined;
+  }
+}
+
+/**
+ * 把上次生成的论文塞进 paperMap / keyIndex，作为 incremental 模式的种子。
+ * 同时按当前的 topics / qualityVenues 配置重新评估，因为 keywords.json
+ * 或 venues.json 可能在两次运行之间被修改。
+ */
+function seedExistingPapers(
+  data: StaticPaperData,
+  paperMap: Map<string, StaticPaper>,
+  keyIndex: Map<string, string>,
+  topics: RuntimeTopic[],
+  qualityVenues: RuntimeQualityVenue[],
+): number {
+  const cutoff = Date.now() - retentionDaysBack * 86_400_000;
+  let kept = 0;
+
+  for (const paper of data.papers) {
+    if (paper.publishedAt) {
+      const t = new Date(paper.publishedAt).getTime();
+      if (Number.isFinite(t) && t < cutoff) continue;
+    }
+
+    const text = buildSearchText({
+      title: paper.title,
+      abstract: paper.abstract,
+      authors: paper.authors,
+      venue: paper.venue,
+    });
+    const refreshedTopics = topics.filter((topic) => matchesTopicByText(text, topic));
+    if (refreshedTopics.length === 0) {
+      continue;
+    }
+
+    paper.topics = refreshedTopics.map(toPublicTopic);
+    paper.qualityVenue = paper.venue ? matchQualityVenueByString(paper.venue, qualityVenues) : undefined;
+
+    paperMap.set(paper.id, paper);
+    for (const key of staticPaperKeys(paper)) {
+      if (!keyIndex.has(key)) keyIndex.set(key, paper.id);
+    }
+    kept += 1;
+  }
+
+  return kept;
+}
+
+function staticPaperKeys(paper: StaticPaper): string[] {
+  const keys = new Set<string>([paper.id]);
+
+  const title = normalizeTitle(paper.title);
+  if (title) keys.add(`title:${title}`);
+
+  for (const source of paper.sources ?? []) {
+    const id = source.sourceId?.toLowerCase();
+    if (!id) continue;
+    if (source.source === "arxiv") keys.add(`arxiv:${id}`);
+    else if (source.source === "semantic_scholar") keys.add(`s2:${id}`);
+    else if (source.source === "acm_crossref") keys.add(`doi:${id}`);
+    else if (source.source === "ieee_xplore" && id.includes("/")) keys.add(`doi:${id}`);
+  }
+
+  return Array.from(keys);
+}
+
+function pruneByRetention(papers: StaticPaper[], days: number): StaticPaper[] {
+  if (!Number.isFinite(days) || days <= 0) {
+    return papers;
+  }
+  const cutoff = Date.now() - days * 86_400_000;
+  return papers.filter((paper) => {
+    if (!paper.publishedAt) return true; // 未知日期暂时保留，由前端决定是否显示
+    const t = new Date(paper.publishedAt).getTime();
+    if (!Number.isFinite(t)) return true;
+    return t >= cutoff;
+  });
 }
 
 main().catch((error) => {
