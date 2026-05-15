@@ -1,21 +1,93 @@
 {
   "topics": [
     {
-      "name": "Generative Models",
-      "description": "Diffusion, image/video generation, editing, synthesis, generative modeling.",
-      "terms": ["diffusion", "generative model", "image generation", "video generation", "editing", "synthesis"],
+      "name": "Computer Vision",
+      "description": "Image understanding tasks including image classification, object detection, image segmentation, visual recognition, and scene understanding.",
+      "terms": [
+        "computer vision",
+        "image classification",
+        "visual recognition",
+        "object detection",
+        "target detection",
+        "bounding box",
+        "semantic segmentation",
+        "instance segmentation",
+        "panoptic segmentation",
+        "scene understanding",
+        "YOLO",
+        "Faster R-CNN",
+        "Mask R-CNN",
+        "DETR",
+        "Deformable DETR",
+        "U-Net",
+        "DeepLab",
+        "SegFormer",
+        "SAM",
+        "Vision Transformer",
+        "ViT",
+        "Swin Transformer"
+      ],
       "excludeTerms": []
     },
     {
-      "name": "Foundation Models",
-      "description": "Transformers, large language models, vision-language models, multimodal learning.",
-      "terms": ["transformer", "large language model", "vision language model", "multimodal", "foundation model"],
+      "name": "Multimodal Large Models",
+      "description": "Vision-language models, multimodal reasoning, image-text understanding, and video-language learning.",
+      "terms": [
+        "vision language model",
+        "VLM",
+        "multimodal model",
+        "multimodal reasoning",
+        "image text",
+        "video language",
+        "visual grounding",
+        "OCR",
+        "CLIP",
+        "LLaVA",
+        "Qwen-VL",
+        "InternVL",
+        "BLIP"
+      ],
       "excludeTerms": []
     },
     {
-      "name": "3D Vision",
-      "description": "Point clouds, LiDAR, 3D perception, segmentation, detection, reconstruction.",
-      "terms": ["point cloud", "LiDAR", "3D perception", "3D segmentation", "3D detection", "3D reconstruction"],
+      "name": "Diffusion and Generative Models",
+      "description": "Diffusion models, image generation, video generation, image editing, and controllable synthesis.",
+      "terms": [
+        "diffusion model",
+        "latent diffusion",
+        "image generation",
+        "video generation",
+        "text to image",
+        "text to video",
+        "Stable Diffusion",
+        "SDXL",
+        "ControlNet",
+        "AnimateDiff",
+        "CogVideo",
+        "Sora",
+        "image editing"
+      ],
+      "excludeTerms": []
+    },
+    {
+      "name": "Point Cloud and 3D Vision",
+      "description": "Point cloud processing, LiDAR perception, 3D object detection, segmentation, and reconstruction.",
+      "terms": [
+        "point cloud",
+        "LiDAR",
+        "3D vision",
+        "3D object detection",
+        "3D segmentation",
+        "3D reconstruction",
+        "autonomous driving",
+        "PointNet",
+        "PV-RCNN",
+        "CenterPoint",
+        "VoxelNet",
+        "Point Transformer",
+        "Gaussian Splatting",
+        "NeRF"
+      ],
       "excludeTerms": ["powerpoint", "power point"]
     }
   ]
