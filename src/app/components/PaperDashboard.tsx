@@ -1,14 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import {
-  emptyStaticPaperData,
-  FIVE_YEARS_DAYS,
-  makeKeywordId,
-  type StaticKeyword,
-  type StaticPaper,
-  type StaticPaperData,
-} from "@/lib/static-data";
+import { useEffect, useMemo, useState } from "react";
+import { emptyStaticPaperData, FIVE_YEARS_DAYS, type StaticPaper, type StaticPaperData } from "@/lib/static-data";
 import styles from "../page.module.css";
 
 const sourceLabels: Record<string, string> = {
@@ -28,41 +21,15 @@ const statusLabels: Record<StaticPaper["openSourceStatus"], string> = {
   none: "未发现开源",
 };
 
-const venuePatterns = [
-  "CVPR",
-  "ICCV",
-  "ECCV",
-  "WACV",
-  "NeurIPS",
-  "ICML",
-  "ICLR",
-  "AAAI",
-  "IJCAI",
-  "ACL",
-  "EMNLP",
-  "NAACL",
-  "KDD",
-  "SIGGRAPH",
-  "SIGIR",
-  "WWW",
-  "ICRA",
-  "IROS",
-  "AISTATS",
-  "UAI",
-];
-
-const localKeywordsKey = "paper-tracker-local-keywords";
 const fiveYears = String(FIVE_YEARS_DAYS);
 
 export function PaperDashboard() {
   const [data, setData] = useState<StaticPaperData>(emptyStaticPaperData);
-  const [localKeywords, setLocalKeywords] = useState<StaticKeyword[]>(readLocalKeywords);
-  const [newKeyword, setNewKeyword] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [source, setSource] = useState("all");
   const [venue, setVenue] = useState("all");
-  const [keywordId, setKeywordId] = useState("all");
+  const [topicId, setTopicId] = useState("all");
   const [days, setDays] = useState(fiveYears);
   const [sort, setSort] = useState<"desc" | "asc">("desc");
   const [loading, setLoading] = useState(true);
@@ -86,12 +53,7 @@ export function PaperDashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    window.localStorage.setItem(localKeywordsKey, JSON.stringify(localKeywords));
-  }, [localKeywords]);
-
-  const allKeywords = useMemo(() => mergeKeywords(data.keywords, localKeywords), [data.keywords, localKeywords]);
-  const venueOptions = useMemo(() => getVenueOptions(data.papers), [data.papers]);
+  const venueOptions = useMemo(() => getVenueOptions(data), [data]);
 
   const papers = useMemo(() => {
     const cutoff = new Date();
@@ -118,15 +80,12 @@ export function PaperDashboard() {
           return false;
         }
 
-        if (venue !== "all" && !matchesVenue(paper, venue)) {
+        if (venue !== "all" && !matchesQualityVenue(paper, venue)) {
           return false;
         }
 
-        if (keywordId !== "all") {
-          const keyword = allKeywords.find((item) => item.id === keywordId);
-          if (!keyword || !matchesKeyword(paper, keyword.term)) {
-            return false;
-          }
+        if (topicId !== "all" && !paper.topics.some((topic) => topic.id === topicId)) {
+          return false;
         }
 
         if (Number.isFinite(Number(days)) && Number(days) > 0 && paper.publishedAt) {
@@ -141,39 +100,12 @@ export function PaperDashboard() {
 
         return sort === "desc" ? rightTime - leftTime : leftTime - rightTime;
       });
-  }, [allKeywords, data.papers, days, keywordId, query, sort, source, status, venue]);
+  }, [data.papers, days, query, sort, source, status, topicId, venue]);
 
   const confirmedCount = useMemo(
     () => papers.filter((paper) => paper.openSourceStatus === "confirmed").length,
     [papers],
   );
-
-  function addKeyword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const term = newKeyword.trim();
-
-    if (!term) {
-      return;
-    }
-
-    const keyword: StaticKeyword = {
-      id: makeKeywordId(term),
-      term,
-      enabled: true,
-      paperCount: data.papers.filter((paper) => matchesKeyword(paper, term)).length,
-    };
-
-    setLocalKeywords((current) => mergeKeywords(current, [keyword]));
-    setNewKeyword("");
-  }
-
-  function deleteLocalKeyword(keyword: StaticKeyword) {
-    setLocalKeywords((current) => current.filter((item) => item.id !== keyword.id));
-
-    if (keywordId === keyword.id) {
-      setKeywordId("all");
-    }
-  }
 
   return (
     <main className={styles.shell}>
@@ -182,7 +114,7 @@ export function PaperDashboard() {
           <p className={styles.eyebrow}>Daily Research Radar</p>
           <h1>论文追踪与开源实现监控</h1>
           <p className={styles.heroText}>
-            静态公网日报站：GitHub Actions 每天生成论文数据，页面可按本地关键词、来源、日期和开源状态筛选。
+            静态公网日报站：GitHub Actions 按主题分类配置每天生成论文数据，页面可按主题、来源、会议、日期和开源状态筛选。
           </p>
         </div>
         <a className={styles.primaryButton} href="https://github.com/" rel="noreferrer" target="_blank">
@@ -191,7 +123,7 @@ export function PaperDashboard() {
       </section>
 
       <section className={styles.metrics}>
-        <Metric label="公共关键词" value={data.keywords.length} />
+        <Metric label="主题分类" value={data.topics.length} />
         <Metric label="当前结果" value={papers.length} />
         <Metric label="确认开源" value={confirmedCount} />
         <Metric label="最后更新" value={formatDate(data.generatedAt)} />
@@ -200,40 +132,26 @@ export function PaperDashboard() {
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <div>
-            <h2>关键词筛选</h2>
-            <p>公共关键词来自仓库配置；你在页面添加的关键词只保存在当前浏览器，用于筛选已生成的数据。</p>
+            <h2>主题分类</h2>
+            <p>主题来自仓库配置，每个主题包含多个相关检索词，用于扩大召回并自动归类。</p>
           </div>
         </div>
-        <form className={styles.keywordForm} onSubmit={addKeyword}>
-          <input
-            aria-label="本地关键词"
-            placeholder="例如：large language model, diffusion policy, graph neural network"
-            value={newKeyword}
-            onChange={(event) => setNewKeyword(event.target.value)}
-          />
-          <button type="submit">添加本地筛选</button>
-        </form>
         <div className={styles.keywordList}>
-          {allKeywords.length === 0 ? (
-            <p className={styles.emptyText}>还没有关键词。请先在 `config/keywords.json` 中配置公共关键词。</p>
+          {data.topics.length === 0 ? (
+            <p className={styles.emptyText}>还没有主题。请先在 `config/keywords.json` 中配置 topics。</p>
           ) : (
-            allKeywords.map((keyword) => {
-              const isLocal = localKeywords.some((item) => item.id === keyword.id);
-
-              return (
-                <div className={styles.keywordPill} key={keyword.id}>
-                  <span className={styles.enabledDot} />
-                  <span>{keyword.term}</span>
-                  <small>{keyword.paperCount} 篇</small>
-                  <small>{isLocal ? "本地" : "公共"}</small>
-                  {isLocal ? (
-                    <button className={styles.textButton} onClick={() => deleteLocalKeyword(keyword)} type="button">
-                      删除
-                    </button>
-                  ) : null}
-                </div>
-              );
-            })
+            data.topics.map((topic) => (
+              <button
+                className={`${styles.keywordPill} ${topicId === topic.id ? styles.activePill : ""}`}
+                key={topic.id}
+                onClick={() => setTopicId(topicId === topic.id ? "all" : topic.id)}
+                type="button"
+              >
+                <span className={styles.enabledDot} />
+                <span>{topic.name}</span>
+                <small>{topic.paperCount} 篇</small>
+              </button>
+            ))
           )}
         </div>
       </section>
@@ -242,7 +160,7 @@ export function PaperDashboard() {
         <div className={styles.panelHeader}>
           <div>
             <h2>论文列表</h2>
-            <p>按关键词、来源、会议、日期、开源状态和发布时间排序筛选。</p>
+            <p>按主题、来源、会议/期刊、日期、开源状态和发布时间排序筛选。</p>
           </div>
         </div>
         <div className={styles.filters}>
@@ -263,18 +181,18 @@ export function PaperDashboard() {
             ))}
           </select>
           <select value={venue} onChange={(event) => setVenue(event.target.value)}>
-            <option value="all">全部会议</option>
+            <option value="all">全部会议/期刊</option>
             {venueOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>
             ))}
           </select>
-          <select value={keywordId} onChange={(event) => setKeywordId(event.target.value)}>
-            <option value="all">全部关键词</option>
-            {allKeywords.map((keyword) => (
-              <option key={keyword.id} value={keyword.id}>
-                {keyword.term}
+          <select value={topicId} onChange={(event) => setTopicId(event.target.value)}>
+            <option value="all">全部主题</option>
+            {data.topics.map((topic) => (
+              <option key={topic.id} value={topic.id}>
+                {topic.name}
               </option>
             ))}
           </select>
@@ -303,6 +221,7 @@ export function PaperDashboard() {
             <article className={styles.paperCard} key={paper.id}>
               <div className={styles.paperMeta}>
                 <span>{sourceLabels[paper.sourcePrimary] ?? paper.sourcePrimary}</span>
+                {paper.qualityVenue ? <span>{paper.qualityVenue.name}</span> : null}
                 <span>{formatDate(paper.publishedAt)}</span>
                 <span className={styles[paper.openSourceStatus]}>{statusLabels[paper.openSourceStatus]}</span>
               </div>
@@ -310,8 +229,8 @@ export function PaperDashboard() {
               {paper.authors ? <p className={styles.authors}>{paper.authors}</p> : null}
               {paper.abstract ? <p className={styles.abstract}>{paper.abstract}</p> : null}
               <div className={styles.tags}>
-                {paper.keywords.map((keyword) => (
-                  <span key={keyword.id}>{keyword.term}</span>
+                {paper.topics.map((topic) => (
+                  <span key={topic.id}>{topic.name}</span>
                 ))}
               </div>
               <div className={styles.links}>
@@ -350,61 +269,41 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 
 function matchesQuery(paper: StaticPaper, query: string) {
   const normalized = query.toLowerCase();
-  return [paper.title, paper.abstract, paper.authors, paper.venue].some((value) => value?.toLowerCase().includes(normalized));
+  const searchText = [
+    paper.title,
+    paper.abstract,
+    paper.authors,
+    paper.venue,
+    paper.qualityVenue?.name,
+    paper.qualityVenue?.matchedAlias,
+    sourceLabels[paper.sourcePrimary] ?? paper.sourcePrimary,
+    ...paper.topics.flatMap((topic) => [topic.name, topic.description, topic.terms.join(" ")]),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return searchText.includes(normalized);
 }
 
-function matchesKeyword(paper: StaticPaper, keyword: string) {
-  const normalized = keyword.toLowerCase();
-  return [paper.title, paper.abstract, paper.authors, paper.venue].some((value) => value?.toLowerCase().includes(normalized));
+function matchesQualityVenue(paper: StaticPaper, venue: string) {
+  return paper.qualityVenue?.name === venue || paper.venue?.toLowerCase().includes(venue.toLowerCase());
 }
 
-function matchesVenue(paper: StaticPaper, venue: string) {
-  const normalizedVenue = normalizeVenue(paper.venue);
-  return normalizedVenue === venue || paper.venue?.toLowerCase().includes(venue.toLowerCase());
-}
-
-function getVenueOptions(papers: StaticPaper[]) {
+function getVenueOptions(data: StaticPaperData) {
   const venues = new Set<string>();
 
-  for (const paper of papers) {
-    const venue = normalizeVenue(paper.venue);
+  for (const venue of data.qualityVenues) {
+    venues.add(venue.name);
+  }
 
-    if (venue) {
-      venues.add(venue);
+  for (const paper of data.papers) {
+    if (paper.qualityVenue?.name) {
+      venues.add(paper.qualityVenue.name);
     }
   }
 
   return Array.from(venues).sort((left, right) => left.localeCompare(right));
-}
-
-function normalizeVenue(venue?: string) {
-  if (!venue) {
-    return undefined;
-  }
-
-  const upperVenue = venue.toUpperCase();
-  const matched = venuePatterns.find((pattern) => upperVenue.includes(pattern.toUpperCase()));
-
-  return matched ?? venue.replace(/\s*\d{4}\s*$/, "").trim();
-}
-
-function mergeKeywords(primary: StaticKeyword[], secondary: StaticKeyword[]) {
-  const byId = new Map<string, StaticKeyword>();
-
-  for (const keyword of [...primary, ...secondary]) {
-    byId.set(keyword.id, keyword);
-  }
-
-  return Array.from(byId.values());
-}
-
-function readLocalKeywords() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  const saved = window.localStorage.getItem(localKeywordsKey);
-  return saved ? (JSON.parse(saved) as StaticKeyword[]) : [];
 }
 
 function formatDate(value?: string | null) {

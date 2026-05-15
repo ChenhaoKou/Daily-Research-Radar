@@ -1,10 +1,23 @@
 {
-  "keywords": [
-    "large language model",
-    "diffusion model",
-    "3D vision",
-    "robot learning",
-    "point cloud"
+  "topics": [
+    {
+      "name": "Generative Models",
+      "description": "Diffusion, image/video generation, editing, synthesis, generative modeling.",
+      "terms": ["diffusion", "generative model", "image generation", "video generation", "editing", "synthesis"],
+      "excludeTerms": []
+    },
+    {
+      "name": "Foundation Models",
+      "description": "Transformers, large language models, vision-language models, multimodal learning.",
+      "terms": ["transformer", "large language model", "vision language model", "multimodal", "foundation model"],
+      "excludeTerms": []
+    },
+    {
+      "name": "3D Vision",
+      "description": "Point clouds, LiDAR, 3D perception, segmentation, detection, reconstruction.",
+      "terms": ["point cloud", "LiDAR", "3D perception", "3D segmentation", "3D detection", "3D reconstruction"],
+      "excludeTerms": ["powerpoint", "power point"]
+    }
   ]
 }
 

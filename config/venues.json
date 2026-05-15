@@ -1,0 +1,33 @@
+{
+  "topConferences": [
+    { "name": "CVPR", "aliases": ["CVPR", "Computer Vision and Pattern Recognition"] },
+    { "name": "ICCV", "aliases": ["ICCV", "International Conference on Computer Vision"] },
+    { "name": "ECCV", "aliases": ["ECCV", "European Conference on Computer Vision"] },
+    { "name": "NeurIPS", "aliases": ["NeurIPS", "Neural Information Processing Systems", "NIPS"] },
+    { "name": "ICML", "aliases": ["ICML", "International Conference on Machine Learning"] },
+    { "name": "ICLR", "aliases": ["ICLR", "International Conference on Learning Representations"] },
+    { "name": "AAAI", "aliases": ["AAAI"] },
+    { "name": "IJCAI", "aliases": ["IJCAI"] },
+    { "name": "ACL", "aliases": ["ACL", "Annual Meeting of the Association for Computational Linguistics"] },
+    { "name": "EMNLP", "aliases": ["EMNLP"] },
+    { "name": "NAACL", "aliases": ["NAACL"] },
+    { "name": "KDD", "aliases": ["KDD", "Knowledge Discovery and Data Mining"] },
+    { "name": "SIGIR", "aliases": ["SIGIR"] },
+    { "name": "WWW", "aliases": ["WWW", "Web Conference"] },
+    { "name": "SIGGRAPH", "aliases": ["SIGGRAPH"] },
+    { "name": "ICRA", "aliases": ["ICRA", "International Conference on Robotics and Automation"] },
+    { "name": "IROS", "aliases": ["IROS", "Intelligent Robots and Systems"] }
+  ],
+  "topJournals": [
+    { "name": "TPAMI", "aliases": ["TPAMI", "IEEE Trans. Pattern Anal. Mach. Intell.", "IEEE Transactions on Pattern Analysis and Machine Intelligence"] },
+    { "name": "IJCV", "aliases": ["IJCV", "International Journal of Computer Vision"] },
+    { "name": "TIP", "aliases": ["TIP", "IEEE Trans. Image Process.", "IEEE Transactions on Image Processing"] },
+    { "name": "TNNLS", "aliases": ["TNNLS", "IEEE Trans. Neural Networks Learn. Syst.", "IEEE Transactions on Neural Networks and Learning Systems"] },
+    { "name": "TMM", "aliases": ["TMM", "IEEE Trans. Multimedia", "IEEE Transactions on Multimedia"] },
+    { "name": "TKDE", "aliases": ["TKDE", "IEEE Trans. Knowl. Data Eng.", "IEEE Transactions on Knowledge and Data Engineering"] },
+    { "name": "TOG", "aliases": ["TOG", "ACM Trans. Graph.", "ACM Transactions on Graphics"] },
+    { "name": "TRO", "aliases": ["TRO", "IEEE Trans. Robotics", "IEEE Transactions on Robotics"] },
+    { "name": "JMLR", "aliases": ["JMLR", "Journal of Machine Learning Research"] },
+    { "name": "Nature Machine Intelligence", "aliases": ["Nature Machine Intelligence"] }
+  ]
+}

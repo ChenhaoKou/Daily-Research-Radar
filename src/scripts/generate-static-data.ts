@@ -3,14 +3,41 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { detectRepository, type RepositoryDetection } from "../lib/github";
 import { normalizeTitle, searchAllSources, type SourcePaper, type SourceResult } from "../lib/sources";
-import { FIVE_YEARS_DAYS, makeKeywordId, type StaticKeyword, type StaticPaper, type StaticPaperData } from "../lib/static-data";
+import { FIVE_YEARS_DAYS, makeTopicId, type StaticPaper, type StaticPaperData, type StaticTopic } from "../lib/static-data";
 
-type KeywordConfig = {
-  keywords: string[];
+type TopicConfig = {
+  topics?: Array<{
+    name: string;
+    description?: string;
+    terms: string[];
+    excludeTerms?: string[];
+  }>;
+  keywords?: string[];
+};
+
+type VenueConfigEntry = {
+  name: string;
+  aliases: string[];
+};
+
+type VenueConfig = {
+  topConferences: VenueConfigEntry[];
+  topJournals: VenueConfigEntry[];
+};
+
+type RuntimeTopic = StaticTopic & {
+  excludeTerms: string[];
+};
+
+type QualityVenue = NonNullable<StaticPaper["qualityVenue"]>;
+
+type RuntimeQualityVenue = QualityVenue & {
+  aliases: string[];
 };
 
 const rootDir = process.cwd();
 const configPath = path.join(rootDir, "config", "keywords.json");
+const venuesPath = path.join(rootDir, "config", "venues.json");
 const outputPath = path.join(rootDir, "public", "data", "papers.json");
 const daysBack = Number(process.env.SYNC_DAYS_BACK ?? FIVE_YEARS_DAYS);
 const limitPerSource = Number(process.env.SYNC_LIMIT_PER_SOURCE ?? 50);
@@ -22,85 +49,163 @@ const emptyRepository: RepositoryDetection = {
 };
 
 async function main() {
-  const keywords = await loadKeywords();
+  const topics = await loadTopics();
+  const qualityVenues = await loadQualityVenues();
   const paperMap = new Map<string, StaticPaper>();
-  const keywordMap = new Map<string, StaticKeyword>();
+  const topicMap = new Map<string, RuntimeTopic>();
   const repositoryTargets: Array<{ key: string; paper: SourcePaper }> = [];
   const warnings: StaticPaperData["warnings"] = [];
 
-  for (const term of keywords) {
-    const keyword = {
-      id: makeKeywordId(term),
-      term,
-      enabled: true,
-      paperCount: 0,
-    };
-    keywordMap.set(keyword.id, keyword);
+  for (const topic of topics) {
+    topicMap.set(topic.id, topic);
 
-    const sourceResults = await searchAllSources(term, {
-      daysBack,
-      limit: limitPerSource,
-    });
-    collectWarnings(sourceResults, warnings);
+    for (const term of topic.terms) {
+      const sourceResults = await searchAllSources(term, {
+        daysBack,
+        limit: limitPerSource,
+      });
+      collectWarnings(sourceResults, warnings, term);
 
-    for (const sourcePaper of sourceResults.flatMap((result) => result.papers)) {
-      const key = getPaperKey(sourcePaper);
-      const existing = paperMap.get(key);
+      for (const sourcePaper of sourceResults.flatMap((result) => result.papers)) {
+        if (!matchesTopic(sourcePaper, topic)) {
+          continue;
+        }
 
-      if (existing) {
-        addKeyword(existing, keyword);
-        addSource(existing, sourcePaper);
-        continue;
+        const qualityVenue = matchQualityVenue(sourcePaper, qualityVenues);
+        if (!qualityVenue) {
+          continue;
+        }
+
+        const key = getPaperKey(sourcePaper);
+        const existing = paperMap.get(key);
+
+        if (existing) {
+          addTopic(existing, topic);
+          addSource(existing, sourcePaper);
+          continue;
+        }
+
+        const paper = toStaticPaper(sourcePaper, topic, emptyRepository, qualityVenue);
+        paperMap.set(key, paper);
+        repositoryTargets.push({ key, paper: sourcePaper });
       }
-
-      const paper = toStaticPaper(sourcePaper, keyword, emptyRepository);
-      paperMap.set(key, paper);
-      repositoryTargets.push({ key, paper: sourcePaper });
     }
   }
 
   await applyRepositoryDetections(paperMap, repositoryTargets.slice(0, repositoryCheckLimit), warnings);
 
   const papers = Array.from(paperMap.values()).sort(sortNewestFirst);
-  for (const keyword of keywordMap.values()) {
-    keyword.paperCount = papers.filter((paper) => paper.keywords.some((item) => item.id === keyword.id)).length;
+  for (const topic of topicMap.values()) {
+    topic.paperCount = papers.filter((paper) => paper.topics.some((item) => item.id === topic.id)).length;
   }
 
   const data: StaticPaperData = {
     generatedAt: new Date().toISOString(),
     daysBack,
-    keywords: Array.from(keywordMap.values()),
+    topics: Array.from(topicMap.values()).map(toPublicTopic),
+    qualityVenues: qualityVenues.map(toPublicQualityVenue),
     papers,
     warnings,
   };
 
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
-  console.log(`[paper-tracker] generated ${papers.length} papers for ${keywords.length} keywords at ${outputPath}`);
+  console.log(`[paper-tracker] generated ${papers.length} papers for ${topics.length} topics at ${outputPath}`);
 
   if (warnings.length > 0) {
     console.warn(warnings.map((warning) => `warning: ${warning.source}: ${warning.message}`).join("\n"));
   }
 }
 
-async function loadKeywords() {
+async function loadTopics(): Promise<RuntimeTopic[]> {
   const raw = await readFile(configPath, "utf8");
-  const config = JSON.parse(raw) as KeywordConfig;
+  const config = JSON.parse(raw) as TopicConfig;
 
-  return Array.from(new Set(config.keywords.map((keyword) => keyword.trim()).filter(Boolean)));
+  if (config.topics?.length) {
+    return config.topics.map((topic) => ({
+      id: makeTopicId(topic.name),
+      name: topic.name,
+      description: topic.description,
+      terms: Array.from(new Set(topic.terms.map((term) => term.trim()).filter(Boolean))),
+      excludeTerms: topic.excludeTerms ?? [],
+      enabled: true,
+      paperCount: 0,
+    }));
+  }
+
+  return (config.keywords ?? []).map((keyword) => ({
+    id: makeTopicId(keyword),
+    name: keyword,
+    terms: [keyword],
+    excludeTerms: [],
+    enabled: true,
+    paperCount: 0,
+  }));
 }
 
-function collectWarnings(sourceResults: SourceResult[], warnings: StaticPaperData["warnings"]) {
+async function loadQualityVenues(): Promise<RuntimeQualityVenue[]> {
+  const raw = await readFile(venuesPath, "utf8");
+  const config = JSON.parse(raw) as VenueConfig;
+  const conferences = config.topConferences.map((venue) => ({
+    name: venue.name,
+    aliases: venue.aliases,
+    type: "conference" as const,
+    rank: "top" as const,
+    matchedAlias: venue.name,
+  }));
+  const journals = config.topJournals.map((venue) => ({
+    name: venue.name,
+    aliases: venue.aliases,
+    type: "journal" as const,
+    rank: "sci-q1" as const,
+    matchedAlias: venue.name,
+  }));
+
+  return [...conferences, ...journals];
+}
+
+function collectWarnings(sourceResults: SourceResult[], warnings: StaticPaperData["warnings"], term: string) {
   for (const result of sourceResults) {
     const message = result.error ?? result.warning;
 
     if (message) {
       warnings.push({
         source: result.source,
-        message,
+        message: `${term}: ${message}`,
       });
     }
   }
+}
+
+function matchesTopic(paper: SourcePaper, topic: RuntimeTopic) {
+  const text = [paper.title, paper.abstract, paper.authors?.join(" "), paper.venue].filter(Boolean).join(" ").toLowerCase();
+  const hasIncludedTerm = topic.terms.some((term) => text.includes(term.toLowerCase()));
+  const hasExcludedTerm = topic.excludeTerms.some((term) => text.includes(term.toLowerCase()));
+
+  return hasIncludedTerm && !hasExcludedTerm;
+}
+
+function matchQualityVenue(paper: SourcePaper, qualityVenues: RuntimeQualityVenue[]): QualityVenue | undefined {
+  const venue = paper.venue?.toLowerCase();
+
+  if (!venue) {
+    return undefined;
+  }
+
+  for (const qualityVenue of qualityVenues) {
+    const matchedAlias = qualityVenue.aliases.find((alias) => venue.includes(alias.toLowerCase()));
+
+    if (matchedAlias) {
+      return {
+        name: qualityVenue.name,
+        type: qualityVenue.type,
+        rank: qualityVenue.rank,
+        matchedAlias,
+      };
+    }
+  }
+
+  return undefined;
 }
 
 async function applyRepositoryDetections(
@@ -140,8 +245,9 @@ function getPaperKey(paper: SourcePaper) {
 
 function toStaticPaper(
   paper: SourcePaper,
-  keyword: StaticKeyword,
-  repository: Awaited<ReturnType<typeof detectRepository>>,
+  topic: RuntimeTopic,
+  repository: RepositoryDetection,
+  qualityVenue: QualityVenue,
 ): StaticPaper {
   return {
     id: getPaperKey(paper),
@@ -157,7 +263,8 @@ function toStaticPaper(
     repositoryUrl: repository.url,
     repositoryConfidence: repository.confidence,
     repositorySource: repository.source,
-    keywords: [keyword],
+    qualityVenue,
+    topics: [toPublicTopic(topic)],
     sources: [
       {
         source: paper.source,
@@ -179,9 +286,9 @@ function toStaticPaper(
   };
 }
 
-function addKeyword(paper: StaticPaper, keyword: StaticKeyword) {
-  if (!paper.keywords.some((item) => item.id === keyword.id)) {
-    paper.keywords.push(keyword);
+function addTopic(paper: StaticPaper, topic: RuntimeTopic) {
+  if (!paper.topics.some((item) => item.id === topic.id)) {
+    paper.topics.push(toPublicTopic(topic));
   }
 }
 
@@ -211,6 +318,25 @@ function applyRepository(paper: StaticPaper, repository: RepositoryDetection) {
         },
       ]
     : [];
+}
+
+function toPublicTopic(topic: RuntimeTopic): StaticTopic {
+  return {
+    id: topic.id,
+    name: topic.name,
+    description: topic.description,
+    terms: topic.terms,
+    enabled: topic.enabled,
+    paperCount: topic.paperCount,
+  };
+}
+
+function toPublicQualityVenue(venue: RuntimeQualityVenue) {
+  return {
+    name: venue.name,
+    type: venue.type,
+    rank: venue.rank,
+  };
 }
 
 function sortNewestFirst(left: StaticPaper, right: StaticPaper) {

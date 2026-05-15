@@ -1,8 +1,10 @@
 export const FIVE_YEARS_DAYS = 365 * 5;
 
-export type StaticKeyword = {
+export type StaticTopic = {
   id: string;
-  term: string;
+  name: string;
+  description?: string;
+  terms: string[];
   enabled: boolean;
   paperCount: number;
 };
@@ -21,7 +23,13 @@ export type StaticPaper = {
   repositoryUrl?: string;
   repositoryConfidence?: number;
   repositorySource?: string;
-  keywords: StaticKeyword[];
+  qualityVenue?: {
+    name: string;
+    type: "conference" | "journal";
+    rank: "top" | "sci-q1";
+    matchedAlias: string;
+  };
+  topics: StaticTopic[];
   sources: Array<{
     source: string;
     sourceId: string;
@@ -44,7 +52,12 @@ export type StaticSyncWarning = {
 export type StaticPaperData = {
   generatedAt: string;
   daysBack: number;
-  keywords: StaticKeyword[];
+  topics: StaticTopic[];
+  qualityVenues: Array<{
+    name: string;
+    type: "conference" | "journal";
+    rank: "top" | "sci-q1";
+  }>;
   papers: StaticPaper[];
   warnings: StaticSyncWarning[];
 };
@@ -52,13 +65,14 @@ export type StaticPaperData = {
 export const emptyStaticPaperData: StaticPaperData = {
   generatedAt: new Date(0).toISOString(),
   daysBack: FIVE_YEARS_DAYS,
-  keywords: [],
+  topics: [],
+  qualityVenues: [],
   papers: [],
   warnings: [],
 };
 
-export function makeKeywordId(term: string) {
-  return term
+export function makeTopicId(name: string) {
+  return name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
