@@ -28,6 +28,29 @@ const statusLabels: Record<StaticPaper["openSourceStatus"], string> = {
   none: "未发现开源",
 };
 
+const venuePatterns = [
+  "CVPR",
+  "ICCV",
+  "ECCV",
+  "WACV",
+  "NeurIPS",
+  "ICML",
+  "ICLR",
+  "AAAI",
+  "IJCAI",
+  "ACL",
+  "EMNLP",
+  "NAACL",
+  "KDD",
+  "SIGGRAPH",
+  "SIGIR",
+  "WWW",
+  "ICRA",
+  "IROS",
+  "AISTATS",
+  "UAI",
+];
+
 const localKeywordsKey = "paper-tracker-local-keywords";
 const fiveYears = String(FIVE_YEARS_DAYS);
 
@@ -38,6 +61,7 @@ export function PaperDashboard() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [source, setSource] = useState("all");
+  const [venue, setVenue] = useState("all");
   const [keywordId, setKeywordId] = useState("all");
   const [days, setDays] = useState(fiveYears);
   const [sort, setSort] = useState<"desc" | "asc">("desc");
@@ -67,6 +91,7 @@ export function PaperDashboard() {
   }, [localKeywords]);
 
   const allKeywords = useMemo(() => mergeKeywords(data.keywords, localKeywords), [data.keywords, localKeywords]);
+  const venueOptions = useMemo(() => getVenueOptions(data.papers), [data.papers]);
 
   const papers = useMemo(() => {
     const cutoff = new Date();
@@ -93,6 +118,10 @@ export function PaperDashboard() {
           return false;
         }
 
+        if (venue !== "all" && !matchesVenue(paper, venue)) {
+          return false;
+        }
+
         if (keywordId !== "all") {
           const keyword = allKeywords.find((item) => item.id === keywordId);
           if (!keyword || !matchesKeyword(paper, keyword.term)) {
@@ -112,7 +141,7 @@ export function PaperDashboard() {
 
         return sort === "desc" ? rightTime - leftTime : leftTime - rightTime;
       });
-  }, [allKeywords, data.papers, days, keywordId, query, sort, source, status]);
+  }, [allKeywords, data.papers, days, keywordId, query, sort, source, status, venue]);
 
   const confirmedCount = useMemo(
     () => papers.filter((paper) => paper.openSourceStatus === "confirmed").length,
@@ -213,7 +242,7 @@ export function PaperDashboard() {
         <div className={styles.panelHeader}>
           <div>
             <h2>论文列表</h2>
-            <p>按关键词、来源、日期、开源状态和发布时间排序筛选。</p>
+            <p>按关键词、来源、会议、日期、开源状态和发布时间排序筛选。</p>
           </div>
         </div>
         <div className={styles.filters}>
@@ -230,6 +259,14 @@ export function PaperDashboard() {
             {Object.entries(sourceLabels).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
+              </option>
+            ))}
+          </select>
+          <select value={venue} onChange={(event) => setVenue(event.target.value)}>
+            <option value="all">全部会议</option>
+            {venueOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
               </option>
             ))}
           </select>
@@ -319,6 +356,36 @@ function matchesQuery(paper: StaticPaper, query: string) {
 function matchesKeyword(paper: StaticPaper, keyword: string) {
   const normalized = keyword.toLowerCase();
   return [paper.title, paper.abstract, paper.authors, paper.venue].some((value) => value?.toLowerCase().includes(normalized));
+}
+
+function matchesVenue(paper: StaticPaper, venue: string) {
+  const normalizedVenue = normalizeVenue(paper.venue);
+  return normalizedVenue === venue || paper.venue?.toLowerCase().includes(venue.toLowerCase());
+}
+
+function getVenueOptions(papers: StaticPaper[]) {
+  const venues = new Set<string>();
+
+  for (const paper of papers) {
+    const venue = normalizeVenue(paper.venue);
+
+    if (venue) {
+      venues.add(venue);
+    }
+  }
+
+  return Array.from(venues).sort((left, right) => left.localeCompare(right));
+}
+
+function normalizeVenue(venue?: string) {
+  if (!venue) {
+    return undefined;
+  }
+
+  const upperVenue = venue.toUpperCase();
+  const matched = venuePatterns.find((pattern) => upperVenue.includes(pattern.toUpperCase()));
+
+  return matched ?? venue.replace(/\s*\d{4}\s*$/, "").trim();
 }
 
 function mergeKeywords(primary: StaticKeyword[], secondary: StaticKeyword[]) {
