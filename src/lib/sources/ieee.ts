@@ -1,5 +1,5 @@
 import type { SourceAdapter, SourcePaper } from "./types";
-import { cleanText, fetchJson, isRecent, parseDate } from "./utils";
+import { cleanText, fetchJson, isRecent } from "./utils";
 
 type IeeeArticle = {
   article_number?: string;
@@ -67,7 +67,7 @@ function toPaper(article: IeeeArticle): SourcePaper | undefined {
       ?.map((author) => cleanText(author.full_name))
       .filter((author): author is string => Boolean(author)),
     venue: cleanText(article.publication_title),
-    publishedAt: parseDate(yearDate?.toISOString()),
+    publishedAt: yearDate,
     url: cleanText(article.html_url),
     pdfUrl: cleanText(article.pdf_url),
     doi: cleanText(article.doi),

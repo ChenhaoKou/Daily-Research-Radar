@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# generated static data (rebuilt by `npm run generate:data` / Actions)
+/public/data/
+
 # production
 /build
 

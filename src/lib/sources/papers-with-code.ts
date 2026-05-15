@@ -10,6 +10,12 @@ type PapersWithCodePaper = {
   arxiv_id?: string;
   url_abs?: string;
   url_pdf?: string;
+  // PWC 给会议论文返回的 proceeding URL，比如
+  //   "https://paperswithcode.com/proceeding/cvpr-2024" 或 "neurips-2023"
+  // 也可能是 null。
+  proceeding?: string;
+  conference?: string;
+  conference_url_abs?: string;
 };
 
 type PapersWithCodeResponse = {
@@ -32,6 +38,7 @@ export const papersWithCodeAdapter: SourceAdapter = {
         `https://paperswithcode.com/api/v1/papers/?${params.toString()}`,
       );
     } catch {
+      // PWC 经常 5xx，安静地跳过，不要让整次抓取失败。
       return [];
     }
 
@@ -55,9 +62,30 @@ function toPaper(paper: PapersWithCodePaper): SourcePaper | undefined {
     title,
     abstract: cleanText(paper.abstract),
     authors: paper.authors,
+    venue: inferVenue(paper),
     publishedAt: parseDate(paper.published),
     url: cleanText(paper.url_abs),
     pdfUrl: cleanText(paper.url_pdf),
     arxivId: cleanText(paper.arxiv_id),
   };
+}
+
+function inferVenue(paper: PapersWithCodePaper): string | undefined {
+  const direct = cleanText(paper.conference);
+  if (direct) {
+    return direct;
+  }
+
+  const proceeding = cleanText(paper.proceeding);
+  if (!proceeding) {
+    return undefined;
+  }
+
+  // proceeding 形如 "https://paperswithcode.com/proceeding/cvpr-2024" 或 "cvpr-2024"
+  const slug = proceeding.split("/").filter(Boolean).pop();
+  if (!slug) {
+    return undefined;
+  }
+
+  return slug.toUpperCase().replace(/-/g, " ");
 }

@@ -1,3 +1,4 @@
+import { fetchJson } from "./sources/utils";
 import type { SourcePaper } from "./sources";
 import { normalizeTitle } from "./sources";
 
@@ -41,6 +42,9 @@ const emptyDetection: RepositoryDetection = {
   status: "none",
   confidence: 0,
 };
+
+// GitHub Search API 的 q 参数限制 256 字符。留出 in:name,description 和引号、限定词的余量。
+const GITHUB_QUERY_BUDGET = 200;
 
 export async function detectRepository(paper: SourcePaper): Promise<RepositoryDetection> {
   const papersWithCode = await detectViaPapersWithCode(paper);
@@ -94,6 +98,7 @@ async function detectViaPapersWithCode(paper: SourcePaper): Promise<RepositoryDe
       stars: repository.stars,
     };
   } catch {
+    // PWC 经常 5xx；让 GitHub 路径继续尝试。
     return emptyDetection;
   }
 }
@@ -107,26 +112,63 @@ function isPapersWithCodeMatch(paper: SourcePaper, candidate: PapersWithCodePape
 }
 
 async function detectViaGitHubSearch(paper: SourcePaper): Promise<RepositoryDetection> {
-  try {
-    const query = `"${paper.title}" in:name,description`;
-    const params = new URLSearchParams({
-      q: query,
-      sort: "stars",
-      order: "desc",
-      per_page: "5",
-    });
-    const response = await fetchGitHubJson<GitHubSearchResponse>(
-      `https://api.github.com/search/repositories?${params.toString()}`,
-    );
-    const candidates = (response.items ?? [])
-      .map((item) => scoreGitHubCandidate(paper, item))
-      .filter((item): item is RepositoryDetection => item.status !== "none")
-      .sort((a, b) => b.confidence - a.confidence);
-
-    return candidates[0] ?? emptyDetection;
-  } catch {
+  const query = buildGitHubQuery(paper.title);
+  if (!query) {
     return emptyDetection;
   }
+
+  const params = new URLSearchParams({
+    q: query,
+    sort: "stars",
+    order: "desc",
+    per_page: "5",
+  });
+  const response = await fetchGitHubJson<GitHubSearchResponse>(
+    `https://api.github.com/search/repositories?${params.toString()}`,
+  );
+  const candidates = (response.items ?? [])
+    .map((item) => scoreGitHubCandidate(paper, item))
+    .filter((item): item is RepositoryDetection => item.status !== "none")
+    .sort((a, b) => b.confidence - a.confidence);
+
+  return candidates[0] ?? emptyDetection;
+}
+
+/**
+ * 把论文标题打包成一段安全的 GitHub Search 查询。
+ * - 短标题：用引号短语匹配。
+ * - 长标题：拆词后挑长度 > 3 的关键 token 拼接，直到接近 256 字符上限。
+ */
+function buildGitHubQuery(title: string): string | undefined {
+  const cleaned = title.trim();
+  if (!cleaned) {
+    return undefined;
+  }
+
+  const suffix = " in:name,description";
+  const quoted = `"${cleaned}"${suffix}`;
+  if (quoted.length <= GITHUB_QUERY_BUDGET) {
+    return quoted;
+  }
+
+  const tokens = normalizeTitle(cleaned)
+    .split(" ")
+    .filter((token) => token.length > 3);
+
+  let q = "";
+  for (const token of tokens) {
+    const next = q ? `${q} ${token}` : token;
+    if (`${next}${suffix}`.length > GITHUB_QUERY_BUDGET) break;
+    q = next;
+  }
+
+  if (!q) {
+    // 整个标题没有长 token，退而求其次截断引号查询。
+    const truncated = cleaned.slice(0, GITHUB_QUERY_BUDGET - suffix.length - 2);
+    return `"${truncated}"${suffix}`;
+  }
+
+  return `${q}${suffix}`;
 }
 
 function scoreGitHubCandidate(
@@ -158,26 +200,9 @@ function scoreGitHubCandidate(
   };
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "paper-tracker/0.1 (+https://localhost)",
-    },
-    signal: AbortSignal.timeout(15000),
-  });
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-
-  return response.json() as Promise<T>;
-}
-
 async function fetchGitHubJson<T>(url: string): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
-    "User-Agent": "paper-tracker/0.1 (+https://localhost)",
     "X-GitHub-Api-Version": "2022-11-28",
   };
 
@@ -185,14 +210,5 @@ async function fetchGitHubJson<T>(url: string): Promise<T> {
     headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   }
 
-  const response = await fetch(url, {
-    headers,
-    signal: AbortSignal.timeout(15000),
-  });
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-
-  return response.json() as Promise<T>;
+  return fetchJson<T>(url, { headers });
 }

@@ -20,6 +20,11 @@ export type StaticPaper = {
   pdfUrl?: string;
   sourcePrimary: string;
   openSourceStatus: "confirmed" | "possible" | "none";
+  /**
+   * 是否对这篇论文跑过开源检索。为 false 时 openSourceStatus 必为 "none"，
+   * 但含义是"未检查"而不是"未发现"。
+   */
+  repositoryChecked: boolean;
   repositoryUrl?: string;
   repositoryConfidence?: number;
   repositorySource?: string;

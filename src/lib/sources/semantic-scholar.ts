@@ -43,8 +43,10 @@ export const semanticScholarAdapter: SourceAdapter = {
       ].join(","),
     });
 
+    const apiKey = process.env.SEMANTIC_SCHOLAR_API_KEY;
     const response = await fetchJson<SemanticResponse>(
       `https://api.semanticscholar.org/graph/v1/paper/search?${params.toString()}`,
+      apiKey ? { headers: { "x-api-key": apiKey } } : undefined,
     );
 
     return (response.data ?? []).map(toPaper).filter((paper): paper is SourcePaper => {

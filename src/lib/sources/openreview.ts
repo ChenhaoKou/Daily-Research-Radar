@@ -1,5 +1,5 @@
 import type { SourceAdapter, SourcePaper } from "./types";
-import { cleanText, fetchJson, isRecent, parseDate } from "./utils";
+import { cleanText, fetchJson, isRecent } from "./utils";
 
 type OpenReviewField<T> = T | { value?: T };
 
@@ -67,7 +67,7 @@ function toPaper(note: OpenReviewNote): SourcePaper | undefined {
     abstract: cleanText(readField(note.content?.abstract)),
     authors: readField(note.content?.authors),
     venue: cleanText(readField(note.content?.venue)),
-    publishedAt: parseDate(publishedAt?.toISOString()),
+    publishedAt,
     url: `https://openreview.net/forum?id=${forum}`,
     pdfUrl: pdfPath?.startsWith("http") ? pdfPath : pdfPath ? `https://openreview.net${pdfPath}` : undefined,
   };
