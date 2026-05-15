@@ -1,6 +1,7 @@
 import { aclAnthologyAdapter } from "./acl-anthology";
 import { acmCrossrefAdapter } from "./acm-crossref";
 import { arxivAdapter } from "./arxiv";
+import { dblpAdapter } from "./dblp";
 import { ieeeAdapter } from "./ieee";
 import { openReviewAdapter } from "./openreview";
 import { papersWithCodeAdapter } from "./papers-with-code";
@@ -12,6 +13,7 @@ export const sourceAdapters: SourceAdapter[] = [
   openReviewAdapter,
   semanticScholarAdapter,
   papersWithCodeAdapter,
+  dblpAdapter,
   aclAnthologyAdapter,
   ieeeAdapter,
   acmCrossrefAdapter,

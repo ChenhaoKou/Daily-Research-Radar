@@ -6,7 +6,7 @@
 
 - 静态公网访问：构建产物输出到 `out/`，可直接部署到 GitHub Pages。
 - 每日自动更新：`.github/workflows/deploy-pages.yml` 每天运行，也支持手动触发。
-- 多来源聚合：arXiv、OpenReview、Semantic Scholar、Papers with Code、ACL Anthology、ACM Crossref 元数据入口。
+- 多来源聚合：arXiv、OpenReview、Semantic Scholar、Papers with Code、DBLP、ACL Anthology、ACM Crossref 元数据入口。
 - IEEE Xplore 支持：配置仓库 secret `IEEE_API_KEY` 后启用。
 - 开源识别：优先 Papers with Code，再用 GitHub Search 做保守匹配。
 - 页面筛选：搜索、来源、关键词、近五年时间窗口、开源状态、发布时间升降序。
@@ -81,3 +81,7 @@ Workflow 会自动：
 ## 限制
 
 GitHub Pages 不能运行后端 API，也不能安全保存网页端全局关键词。本项目的网页端关键词只保存在当前浏览器。如果以后需要“网页修改关键词并同步到所有设备”，需要外接后端和数据库，或改用 Vercel/Railway/VPS 这类动态部署。
+
+git add config/keywords.json
+git commit -m "Update tracked paper keywords"
+git push

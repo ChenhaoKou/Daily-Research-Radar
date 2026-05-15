@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { detectRepository } from "../lib/github";
+import { detectRepository, type RepositoryDetection } from "../lib/github";
 import { normalizeTitle, searchAllSources, type SourcePaper, type SourceResult } from "../lib/sources";
 import { FIVE_YEARS_DAYS, makeKeywordId, type StaticKeyword, type StaticPaper, type StaticPaperData } from "../lib/static-data";
 
@@ -14,11 +14,18 @@ const configPath = path.join(rootDir, "config", "keywords.json");
 const outputPath = path.join(rootDir, "public", "data", "papers.json");
 const daysBack = Number(process.env.SYNC_DAYS_BACK ?? FIVE_YEARS_DAYS);
 const limitPerSource = Number(process.env.SYNC_LIMIT_PER_SOURCE ?? 50);
+const repositoryCheckLimit = Number(process.env.REPOSITORY_CHECK_LIMIT ?? 80);
+const repositoryConcurrency = Number(process.env.REPOSITORY_CHECK_CONCURRENCY ?? 6);
+const emptyRepository: RepositoryDetection = {
+  status: "none",
+  confidence: 0,
+};
 
 async function main() {
   const keywords = await loadKeywords();
   const paperMap = new Map<string, StaticPaper>();
   const keywordMap = new Map<string, StaticKeyword>();
+  const repositoryTargets: Array<{ key: string; paper: SourcePaper }> = [];
   const warnings: StaticPaperData["warnings"] = [];
 
   for (const term of keywords) {
@@ -46,11 +53,13 @@ async function main() {
         continue;
       }
 
-      const repository = await detectRepository(sourcePaper);
-      const paper = toStaticPaper(sourcePaper, keyword, repository);
+      const paper = toStaticPaper(sourcePaper, keyword, emptyRepository);
       paperMap.set(key, paper);
+      repositoryTargets.push({ key, paper: sourcePaper });
     }
   }
+
+  await applyRepositoryDetections(paperMap, repositoryTargets.slice(0, repositoryCheckLimit), warnings);
 
   const papers = Array.from(paperMap.values()).sort(sortNewestFirst);
   for (const keyword of keywordMap.values()) {
@@ -92,6 +101,37 @@ function collectWarnings(sourceResults: SourceResult[], warnings: StaticPaperDat
       });
     }
   }
+}
+
+async function applyRepositoryDetections(
+  paperMap: Map<string, StaticPaper>,
+  targets: Array<{ key: string; paper: SourcePaper }>,
+  warnings: StaticPaperData["warnings"],
+) {
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < targets.length) {
+      const target = targets[nextIndex];
+      nextIndex += 1;
+
+      try {
+        const repository = await detectRepository(target.paper);
+        const staticPaper = paperMap.get(target.key);
+
+        if (staticPaper) {
+          applyRepository(staticPaper, repository);
+        }
+      } catch (error) {
+        warnings.push({
+          source: "github_search",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(repositoryConcurrency, targets.length) }, () => worker()));
 }
 
 function getPaperKey(paper: SourcePaper) {
@@ -153,6 +193,24 @@ function addSource(paper: StaticPaper, sourcePaper: SourcePaper) {
       url: sourcePaper.url,
     });
   }
+}
+
+function applyRepository(paper: StaticPaper, repository: RepositoryDetection) {
+  paper.openSourceStatus = repository.status;
+  paper.repositoryUrl = repository.url;
+  paper.repositoryConfidence = repository.confidence;
+  paper.repositorySource = repository.source;
+  paper.repositories = repository.url
+    ? [
+        {
+          url: repository.url,
+          status: repository.status,
+          confidence: repository.confidence,
+          stars: repository.stars,
+          source: repository.source,
+        },
+      ]
+    : [];
 }
 
 function sortNewestFirst(left: StaticPaper, right: StaticPaper) {

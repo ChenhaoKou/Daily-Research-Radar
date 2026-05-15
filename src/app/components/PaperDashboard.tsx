@@ -16,6 +16,7 @@ const sourceLabels: Record<string, string> = {
   openreview: "OpenReview",
   semantic_scholar: "Semantic Scholar",
   papers_with_code: "Papers with Code",
+  dblp: "DBLP",
   acl_anthology: "ACL Anthology",
   ieee_xplore: "IEEE Xplore",
   acm_crossref: "ACM Digital Library",

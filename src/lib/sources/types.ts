@@ -5,7 +5,8 @@ export type PaperSourceName =
   | "papers_with_code"
   | "acl_anthology"
   | "ieee_xplore"
-  | "acm_crossref";
+  | "acm_crossref"
+  | "dblp";
 
 export type SourcePaper = {
   source: PaperSourceName;
