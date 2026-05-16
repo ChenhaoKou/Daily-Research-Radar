@@ -2,7 +2,13 @@ import "dotenv/config";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { detectRepository, type RepositoryDetection } from "../lib/github";
-import { normalizeTitle, searchAllSources, type SourcePaper, type SourceResult } from "../lib/sources";
+import {
+  normalizeTitle,
+  searchAllSources,
+  type PaperSourceName,
+  type SourcePaper,
+  type SourceResult,
+} from "../lib/sources";
 import {
   FIVE_YEARS_DAYS,
   makeTopicId,
@@ -61,7 +67,7 @@ const retentionDaysBack = Number(process.env.SYNC_DAYS_BACK ?? FIVE_YEARS_DAYS);
 const incrementalDaysBack = Number(process.env.SYNC_INCREMENTAL_DAYS_BACK ?? 7);
 const requestedMode: SyncMode = process.env.SYNC_MODE === "incremental" ? "incremental" : "full";
 const limitPerSource = Number(process.env.SYNC_LIMIT_PER_SOURCE ?? 50);
-const repositoryCheckLimit = Number(process.env.REPOSITORY_CHECK_LIMIT ?? 80);
+const repositoryCheckLimit = Number(process.env.REPOSITORY_CHECK_LIMIT ?? 600);
 const repositoryConcurrency = Number(process.env.REPOSITORY_CHECK_CONCURRENCY ?? 4);
 const termLimit = Number(process.env.SYNC_TERM_LIMIT ?? 0); // 0 表示不限
 // 每个 topic 最多保留多少篇论文。429 个 term 合起来可能产出几万篇，
@@ -75,8 +81,6 @@ async function main() {
   // 多键索引：同一篇论文从不同源回来可能只有 doi/arxivId/title 之一，
   // 这里把每一个可用 key 都映射到 paperMap 的主 key，避免重复入库。
   const keyIndex = new Map<string, string>();
-  const repositoryQueue: Array<{ key: string; paper: SourcePaper }> = [];
-  const repoSeen = new Set<string>();
   const warnings: StaticPaperData["warnings"] = [];
 
   // 决定本次跑 full 还是 incremental。incremental 模式下要求能读到上次的输出，
@@ -156,11 +160,6 @@ async function main() {
       const paper = toStaticPaper(canonicalKey, sourcePaper, matchedTopics, qualityVenue);
       paperMap.set(canonicalKey, paper);
       kept += 1;
-
-      if (!repoSeen.has(canonicalKey)) {
-        repoSeen.add(canonicalKey);
-        repositoryQueue.push({ key: canonicalKey, paper: sourcePaper });
-      }
     }
 
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
@@ -189,12 +188,24 @@ async function main() {
     );
   }
 
-  // 仓库检测放在裁剪之后：被裁掉的论文不值得占 GitHub API 配额。
-  const keptKeys = new Set(papers.map((paper) => paper.id));
-  const repositoryTargets = repositoryQueue
-    .filter((entry) => keptKeys.has(entry.key))
-    .slice(0, repositoryCheckLimit);
+  // 仓库检测：从被保留下来的论文里挑还没检测过的，按发布时间从新到旧。
+  // 这样 seed 进来但之前因为 limit 没轮到的旧论文，下一轮会接着补检。
+  const repositoryTargets = papers
+    .filter((paper) => !paper.repositoryChecked)
+    .slice(0, repositoryCheckLimit)
+    .map((paper) => ({ key: paper.id, paper: rebuildSourcePaper(paper) }));
+  console.log(
+    `[paper-tracker] repository check: ${repositoryTargets.length} candidates ` +
+      `(limit=${repositoryCheckLimit}, already-checked=${papers.length - papers.filter((p) => !p.repositoryChecked).length})`,
+  );
   await applyRepositoryDetections(paperMap, repositoryTargets, warnings);
+  const checkedNow = papers.filter((p) => p.repositoryChecked && (p.repositoryUrl || p.openSourceStatus !== "none")).length;
+  const confirmedTotal = papers.filter((p) => p.openSourceStatus === "confirmed").length;
+  const possibleTotal = papers.filter((p) => p.openSourceStatus === "possible").length;
+  console.log(
+    `[paper-tracker] repository results: confirmed=${confirmedTotal}, possible=${possibleTotal}, ` +
+      `with-url-this-run=${checkedNow}`,
+  );
 
   recomputeTopicCounts(topics, papers);
 
@@ -653,6 +664,30 @@ function staticPaperKeys(paper: StaticPaper): string[] {
   }
 
   return Array.from(keys);
+}
+
+/**
+ * 把一个 StaticPaper 还原成 detectRepository 需要的最小 SourcePaper 形状。
+ * 主要用 arxivId / doi / title 三件套来驱动 GitHub 搜索。
+ */
+function rebuildSourcePaper(paper: StaticPaper): SourcePaper {
+  const arxivSource = paper.sources?.find((s) => s.source === "arxiv");
+  const doiSource = paper.sources?.find(
+    (s) => s.source === "acm_crossref" || (s.source === "ieee_xplore" && s.sourceId.includes("/")),
+  );
+  const primarySource = paper.sources?.[0];
+
+  return {
+    source: ((primarySource?.source ?? paper.sourcePrimary) as PaperSourceName) ?? "arxiv",
+    sourceId: primarySource?.sourceId ?? paper.id,
+    title: paper.title,
+    abstract: paper.abstract,
+    venue: paper.venue,
+    url: paper.url,
+    pdfUrl: paper.pdfUrl,
+    arxivId: arxivSource?.sourceId,
+    doi: doiSource?.sourceId,
+  };
 }
 
 function pruneByRetention(papers: StaticPaper[], days: number): StaticPaper[] {

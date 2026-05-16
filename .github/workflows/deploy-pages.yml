@@ -101,6 +101,7 @@ jobs:
           SYNC_INCREMENTAL_DAYS_BACK: "7"
           SYNC_LIMIT_PER_SOURCE: "30"
           MAX_PAPERS_PER_TOPIC: "400"
+          REPOSITORY_CHECK_LIMIT: "1000"
 
       - name: Build static site
         run: npm run build

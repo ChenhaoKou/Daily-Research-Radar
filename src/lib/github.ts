@@ -10,25 +10,6 @@ export type RepositoryDetection = {
   stars?: number;
 };
 
-type PapersWithCodePaper = {
-  id?: string;
-  title?: string;
-  arxiv_id?: string;
-};
-
-type PapersWithCodeSearchResponse = {
-  results?: PapersWithCodePaper[];
-};
-
-type PapersWithCodeRepository = {
-  url?: string;
-  stars?: number;
-};
-
-type PapersWithCodeRepositoryResponse = {
-  results?: PapersWithCodeRepository[];
-};
-
 type GitHubSearchResponse = {
   items?: Array<{
     html_url?: string;
@@ -47,85 +28,89 @@ const emptyDetection: RepositoryDetection = {
 const GITHUB_QUERY_BUDGET = 200;
 
 export async function detectRepository(paper: SourcePaper): Promise<RepositoryDetection> {
-  const papersWithCode = await detectViaPapersWithCode(paper);
-
-  if (papersWithCode.status === "confirmed") {
-    return papersWithCode;
+  // 1. arXiv ID 在 README 里出现 → 几乎一定是这篇论文的代码仓库（最强信号）。
+  if (paper.arxivId) {
+    const byArxiv = await safeSearch(() => searchByArxivId(paper.arxivId!));
+    if (byArxiv.status !== "none") {
+      return byArxiv;
+    }
   }
 
-  const github = await detectViaGitHubSearch(paper);
-
-  if (github.status !== "none") {
-    return github;
+  // 2. DOI 同理。
+  if (paper.doi) {
+    const byDoi = await safeSearch(() => searchByDoi(paper.doi!));
+    if (byDoi.status !== "none") {
+      return byDoi;
+    }
   }
 
-  return papersWithCode.status === "possible" ? papersWithCode : emptyDetection;
+  // 3. 退化到 name/description 里的标题匹配。
+  return safeSearch(() => searchByTitle(paper));
 }
 
-async function detectViaPapersWithCode(paper: SourcePaper): Promise<RepositoryDetection> {
+async function safeSearch(
+  run: () => Promise<RepositoryDetection>,
+): Promise<RepositoryDetection> {
   try {
-    const params = new URLSearchParams({
-      q: paper.arxivId ?? paper.title,
-      items_per_page: "5",
-    });
-    const search = await fetchJson<PapersWithCodeSearchResponse>(
-      `https://paperswithcode.com/api/v1/papers/?${params.toString()}`,
-    );
-    const match = (search.results ?? []).find((candidate) => isPapersWithCodeMatch(paper, candidate));
-
-    if (!match?.id) {
-      return emptyDetection;
-    }
-
-    const repositories = await fetchJson<PapersWithCodeRepositoryResponse>(
-      `https://paperswithcode.com/api/v1/papers/${encodeURIComponent(match.id)}/repositories/`,
-    );
-    const repository = (repositories.results ?? []).find((repo) => repo.url?.includes("github.com"));
-
-    if (!repository?.url) {
-      return {
-        status: "possible",
-        source: "papers_with_code",
-        confidence: 0.55,
-      };
-    }
-
-    return {
-      status: "confirmed",
-      url: repository.url,
-      source: "papers_with_code",
-      confidence: 0.95,
-      stars: repository.stars,
-    };
+    return await run();
   } catch {
-    // PWC 经常 5xx；让 GitHub 路径继续尝试。
     return emptyDetection;
   }
 }
 
-function isPapersWithCodeMatch(paper: SourcePaper, candidate: PapersWithCodePaper): boolean {
-  if (paper.arxivId && candidate.arxiv_id && paper.arxivId.toLowerCase() === candidate.arxiv_id.toLowerCase()) {
-    return true;
+async function searchByArxivId(arxivId: string): Promise<RepositoryDetection> {
+  const cleanId = arxivId.replace(/^arxiv:/i, "").trim();
+  if (!cleanId) return emptyDetection;
+
+  // arxiv.org/abs/<id> 是论文页 URL，绝大多数复刻代码的 README 都直接贴这一段。
+  const queries = [
+    `"arxiv.org/abs/${cleanId}" in:readme`,
+    `"arxiv:${cleanId}" in:readme`,
+  ];
+
+  for (const q of queries) {
+    const response = await searchRepositories(q);
+    const top = pickBestRepoCandidate(response);
+    if (top) {
+      return {
+        status: "confirmed",
+        url: top.html_url,
+        source: "github_search",
+        confidence: 0.9,
+        stars: top.stargazers_count,
+      };
+    }
   }
 
-  return normalizeTitle(paper.title) === normalizeTitle(candidate.title ?? "");
+  return emptyDetection;
 }
 
-async function detectViaGitHubSearch(paper: SourcePaper): Promise<RepositoryDetection> {
-  const query = buildGitHubQuery(paper.title);
+async function searchByDoi(doi: string): Promise<RepositoryDetection> {
+  const trimmed = doi.trim();
+  if (!trimmed) return emptyDetection;
+
+  const response = await searchRepositories(`"${trimmed}" in:readme`);
+  const top = pickBestRepoCandidate(response);
+  if (top) {
+    return {
+      status: "confirmed",
+      url: top.html_url,
+      source: "github_search",
+      confidence: 0.88,
+      stars: top.stargazers_count,
+    };
+  }
+
+  return emptyDetection;
+}
+
+async function searchByTitle(paper: SourcePaper): Promise<RepositoryDetection> {
+  const query = buildTitleQuery(paper.title);
   if (!query) {
     return emptyDetection;
   }
 
-  const params = new URLSearchParams({
-    q: query,
-    sort: "stars",
-    order: "desc",
-    per_page: "5",
-  });
-  const response = await fetchGitHubJson<GitHubSearchResponse>(
-    `https://api.github.com/search/repositories?${params.toString()}`,
-  );
+  const response = await searchRepositories(query);
   const candidates = (response.items ?? [])
     .map((item) => scoreGitHubCandidate(paper, item))
     .filter((item): item is RepositoryDetection => item.status !== "none")
@@ -134,12 +119,36 @@ async function detectViaGitHubSearch(paper: SourcePaper): Promise<RepositoryDete
   return candidates[0] ?? emptyDetection;
 }
 
+async function searchRepositories(q: string): Promise<GitHubSearchResponse> {
+  const params = new URLSearchParams({
+    q,
+    sort: "stars",
+    order: "desc",
+    per_page: "5",
+  });
+  return fetchGitHubJson<GitHubSearchResponse>(
+    `https://api.github.com/search/repositories?${params.toString()}`,
+  );
+}
+
+function pickBestRepoCandidate(
+  response: GitHubSearchResponse,
+): { html_url: string; stargazers_count?: number } | undefined {
+  const items = response.items ?? [];
+  for (const item of items) {
+    if (item.html_url) {
+      return { html_url: item.html_url, stargazers_count: item.stargazers_count };
+    }
+  }
+  return undefined;
+}
+
 /**
  * 把论文标题打包成一段安全的 GitHub Search 查询。
  * - 短标题：用引号短语匹配。
  * - 长标题：拆词后挑长度 > 3 的关键 token 拼接，直到接近 256 字符上限。
  */
-function buildGitHubQuery(title: string): string | undefined {
+function buildTitleQuery(title: string): string | undefined {
   const cleaned = title.trim();
   if (!cleaned) {
     return undefined;

@@ -70,7 +70,8 @@ const HOST_MIN_GAP_MS: Record<string, number> = {
   "paperswithcode.com": 1500,
   "aclanthology.org": 1500,
   "ieeexploreapi.ieee.org": 1000,
-  "api.github.com": 800,
+  // GitHub Search API 鉴权后限 30 req/min，留点余量给 4xx/5xx 重试。
+  "api.github.com": 2500,
 };
 
 const DEFAULT_HOST_GAP_MS = 500;
