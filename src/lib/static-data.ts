@@ -78,9 +78,12 @@ export const emptyStaticPaperData: StaticPaperData = {
 };
 
 export function makeTopicId(name: string) {
-  return name
+  // 把空白/标点/符号合并为短横线，但保留 unicode 字母和数字。
+  // 之前的 `[^a-z0-9]+` 会把中文 topic 名整段抹空，导致所有 topic 共享同一个 id。
+  const id = name
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[\s\p{P}\p{S}]+/gu, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
+  return id || "topic";
 }
