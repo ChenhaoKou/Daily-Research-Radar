@@ -1,11 +1,11 @@
 # Paper Tracker
 
-一个可部署到 GitHub Pages 的静态论文日报站。GitHub Actions 每天按主题分类抓取近五年论文，只保留命中顶会/高质量期刊白名单的结果，生成静态 JSON 数据，页面公网可访问并支持站内搜索、筛选、排序和 GitHub 开源状态展示。
+一个可部署到 GitHub Pages 的静态论文日报站。GitHub Actions 按主题分类抓取近三年论文，生成静态 JSON 数据，页面公网可访问并支持站内搜索、筛选、排序和 GitHub 开源状态展示。
 
 ## 功能
 
 - 静态公网访问：构建产物输出到 `out/`，可直接部署到 GitHub Pages。
-- 每日自动更新：`.github/workflows/deploy-pages.yml` 每天运行，也支持手动触发。
+- 每周自动更新：`.github/workflows/deploy-pages.yml` 每周日 00:00（北京时间）增量抓取最近 7 天的新论文并合并到已有数据，也支持手动触发完整重跑。
 - 多来源聚合：arXiv、OpenReview、Semantic Scholar、Papers with Code、DBLP、ACL Anthology、ACM Crossref 元数据入口。
 - IEEE Xplore 支持：配置仓库 secret `IEEE_API_KEY` 后启用。
 - 开源识别：优先 Papers with Code，再用 GitHub Search 做保守匹配。
@@ -37,7 +37,7 @@ npm install
 }
 ```
 
-每个主题可以配置多个 `terms` 来扩大召回，并用 `excludeTerms` 排除明显误匹配。GitHub Actions 每天按这些主题生成全站公共论文数据。
+每个主题可以配置多个 `terms` 来扩大召回，并用 `excludeTerms` 排除明显误匹配。GitHub Actions 每周日按这些主题增量更新全站公共论文数据。
 
 ## 配置顶会/顶刊白名单
 

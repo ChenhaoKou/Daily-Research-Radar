@@ -11,7 +11,8 @@ on:
           - incremental
           - full
   schedule:
-    - cron: "0 22 * * *"
+    # 每周日 00:00 北京时间（UTC+8）= 每周六 16:00 UTC。
+    - cron: "0 16 * * 6"
   push:
     branches:
       - main
@@ -26,15 +27,20 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# Belt-and-suspenders: if some action's floating major tag hasn't been moved
+# to a Node-24 patch yet, force the runner to execute it on Node 24 anyway.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -100,7 +106,7 @@ jobs:
         run: npm run build
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: out
 
